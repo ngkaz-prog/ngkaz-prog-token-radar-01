@@ -577,3 +577,119 @@ export function boardIssue(board: BoardRow[], snapshot: Snapshot): string | null
 export function dataScript(radar: RadarData): string {
   return `window.RADAR=${JSON.stringify(radar)};\n`;
 }
+
+/** One category's share of the board: how many protocols, how much TVL, how much implied value. */
+export interface CategorySummary {
+  category: string;
+  rows: number;
+  watchlist_rows: number;
+  tvl_usd: number;
+  implied_value_usd: number;
+  top_slug: string;
+  top_name: string;
+  top_implied_value_usd: number;
+  median_implied_value_usd: number;
+}
+
+/** The middle of a sorted list of numbers, or 0 for an empty one. */
+function median(values: number[]): number {
+  if (values.length === 0) return 0;
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 1 ? sorted[mid]! : Math.round((sorted[mid - 1]! + sorted[mid]!) / 2);
+}
+
+/**
+ * The board grouped by category, strongest category first by total implied value. A protocol
+ * with no category is filed under "(no category)". The board itself is untouched: this is a
+ * reading aid for the ranked rows, not a second ranking, and every figure here is a sum or a
+ * median of the board's own rows, so the summary can be checked against board.json line by line.
+ */
+export function buildCategorySummary(board: BoardRow[], watchlist: string[]): CategorySummary[] {
+  const groups = new Map<string, BoardRow[]>();
+  for (const row of board) {
+    const key = row.category ?? '(no category)';
+    const list = groups.get(key);
+    if (list === undefined) groups.set(key, [row]);
+    else list.push(row);
+  }
+  const summaries: CategorySummary[] = [];
+  for (const [category, rows] of groups) {
+    const sorted = [...rows].sort((a, b) => b.implied_value_usd - a.implied_value_usd);
+    const top = sorted[0]!;
+    summaries.push({
+      category,
+      rows: rows.length,
+      watchlist_rows: rows.filter((r) => watchlist.includes(r.slug)).length,
+      tvl_usd: rows.reduce((s, r) => s + r.tvl_usd, 0),
+      implied_value_usd: rows.reduce((s, r) => s + r.implied_value_usd, 0),
+      top_slug: top.slug,
+      top_name: top.name,
+      top_implied_value_usd: top.implied_value_usd,
+      median_implied_value_usd: median(rows.map((r) => r.implied_value_usd)),
+    });
+  }
+  summaries.sort((a, b) => b.implied_value_usd - a.implied_value_usd || (a.category < b.category ? -1 : 1));
+  return summaries;
+}
+
+/** How the board splits between the house's watchlist and the early rows found below its floor. */
+export interface BoardSplit {
+  watchlist_rows: number;
+  early_rows: number;
+  watchlist_implied_value_usd: number;
+  early_implied_value_usd: number;
+}
+
+/** The watchlist rows against the early rows: the floor's share of the board's implied value. */
+export function boardSplit(board: BoardRow[], watchlist: string[]): BoardSplit {
+  const onList = board.filter((r) => watchlist.includes(r.slug));
+  const early = board.filter((r) => !watchlist.includes(r.slug));
+  return {
+    watchlist_rows: onList.length,
+    early_rows: early.length,
+    watchlist_implied_value_usd: onList.reduce((s, r) => s + r.implied_value_usd, 0),
+    early_implied_value_usd: early.reduce((s, r) => s + r.implied_value_usd, 0),
+  };
+}
+
+/** A dollar amount with thousands separators, no decimals. */
+function dollars(n: number): string {
+  return `$${Math.round(n).toLocaleString('en-US')}`;
+}
+
+/**
+ * The category summary as a markdown table a reader can skim: one row per category, strongest
+ * first, with the top protocol named so the table can be checked against board.json, and a
+ * watchlist split underneath it so the floor's share of the board is visible at a glance.
+ */
+export function categorySummaryMarkdown(
+  summaries: CategorySummary[],
+  split: BoardSplit,
+  asOf: string,
+  boardSize: number,
+): string {
+  const lines = [
+    `# Token Radar: value by category`,
+    ``,
+    `Snapshot as of ${asOf}. ${boardSize} pre-token protocols on the board, grouped by the category DefiLlama records for each one. Implied value is the radar-2 model's figure from board.json, summed per category.`,
+    ``,
+    `| Category | Rows | Watchlist | TVL | Implied value | Median | Top protocol |`,
+    `| --- | ---: | ---: | ---: | ---: | ---: | --- |`,
+  ];
+  for (const s of summaries) {
+    lines.push(
+      `| ${s.category} | ${s.rows} | ${s.watchlist_rows} | ${dollars(s.tvl_usd)} | ${dollars(s.implied_value_usd)} | ${dollars(s.median_implied_value_usd)} | ${s.top_name} (${dollars(s.top_implied_value_usd)}) |`,
+    );
+  }
+  lines.push(
+    ``,
+    `Top protocol names are checked against board.json: each one is the category's highest-ranked row.`,
+    ``,
+    `## Watchlist against early rows`,
+    ``,
+    `The house's watchlist is the floor, never a ceiling: ${split.watchlist_rows} rows are on it and ${split.early_rows} sit below its $50M floor. The watchlist rows carry ${dollars(split.watchlist_implied_value_usd)} of implied value and the early rows ${dollars(split.early_implied_value_usd)}.`,
+    ``,
+  );
+  return `${lines.join('\n')}\n`;
+}

@@ -3,8 +3,10 @@
 // It reads the sealed snapshot from /input/snapshot.json (or --input <file|dir>), scores every
 // pre-token, non-exchange protocol with the model in lib/model.ts, writes the ranked board to
 // /output/board.json, writes the dashboard's data as /output/data.js, copies this repository's
-// dashboard/ and screenshots/ to /output, and writes /output/dossier.json with the vendored
-// make.fun library. The run is deterministic: the same snapshot always writes the same bytes.
+// dashboard/ and screenshots/ to /output, writes a per-category summary of the board's value as
+// /output/category-summary.json and /output/category-summary.md, and writes /output/dossier.json
+// with the vendored make.fun library. The run is deterministic: the same snapshot always writes
+// the same bytes. --summary also prints the category summary to stdout; --help prints the usage.
 //
 // Outside the grader's container, MAKEFUN_OUTPUT_DIR stands in for /output:
 //   mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts --input ../input/snapshot.json
@@ -12,7 +14,7 @@
 import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { boardIssue, buildRadar, dataScript, parseSnapshot } from './lib/model.ts';
+import { boardIssue, boardSplit, buildCategorySummary, buildRadar, categorySummaryMarkdown, dataScript, parseSnapshot } from './lib/model.ts';
 import { buildDossier } from './vendor/makefun-board.ts';
 
 const here = fileURLToPath(new URL('.', import.meta.url));
@@ -33,6 +35,30 @@ function arg(name: string, fallback: string): string {
 
 const inputArg = arg('input', '/input');
 const inputFile = inputArg.endsWith('.json') ? inputArg : join(inputArg, 'snapshot.json');
+
+/** Whether the arguments carry a bare flag, `--name` or `--name=value`. */
+function hasFlag(name: string): boolean {
+  return process.argv.includes(`--${name}`) || process.argv.some((a) => a.startsWith(`--${name}=`));
+}
+
+if (hasFlag('help')) {
+  process.stdout.write(
+    `token radar: rank the pre-token protocols in a sealed snapshot by implied value\n` +
+      `\n` +
+      `usage: node main.ts [--input <snapshot.json|directory>] [--output <dir>] [--summary] [--help]\n` +
+      `\n` +
+      `  --input <file|dir>   the sealed snapshot, default /input\n` +
+      `  --output <dir>       where the board, the dashboard and the dossier go, default /output\n` +
+      `                       (MAKEFUN_OUTPUT_DIR stands in for it outside the grader)\n` +
+      `  --summary            print the per-category summary to stdout as well as writing it\n` +
+      `  --help               print this usage and stop\n` +
+      `\n` +
+      `writes board.json, data.js, dashboard/, screenshots/, category-summary.json,\n` +
+      `category-summary.md and dossier.json. The run is deterministic.\n`,
+  );
+  process.exit(0);
+}
+
 if (!existsSync(inputFile)) {
   process.stderr.write(`token radar: no snapshot at ${inputFile}: pass --input <snapshot.json|directory> or mount the sealed /input\n`);
   process.exit(2);
@@ -50,6 +76,14 @@ if (issue !== null) {
 mkdirSync(out, { recursive: true });
 writeFileSync(join(out, 'board.json'), `${JSON.stringify({ rows: board })}\n`);
 writeFileSync(join(out, 'data.js'), dataScript(radar));
+
+// Where the board's value sits, by category: a JSON file for machines and a markdown table
+// for readers, both derived from the same board rows, so they agree with board.json.
+const summaries = buildCategorySummary(board, snapshot.watchlist);
+const split = boardSplit(board, snapshot.watchlist);
+const summaryMd = categorySummaryMarkdown(summaries, split, snapshot.as_of, board.length);
+writeFileSync(join(out, 'category-summary.json'), `${JSON.stringify({ as_of: snapshot.as_of, board_size: board.length, split, categories: summaries }, null, 2)}\n`);
+writeFileSync(join(out, 'category-summary.md'), summaryMd);
 
 /** Copy one directory's regular files into `to`, skipping names that start with a dot. */
 function copyFiles(from: string, to: string): string[] {
@@ -84,5 +118,6 @@ writeFileSync(join(out, 'dossier.json'), buildDossier(out, { text_max_bytes: TEX
 
 process.stdout.write(
   `token radar: ${snapshot.protocols.length} protocols, ${snapshot.watchlist.length} on the watchlist, ${board.length} rows scored (${radar.early_size} early, ${radar.live_size} live set aside)\n` +
-    `token radar: wrote ${join(out, 'board.json')}, ${join(out, 'data.js')}, ${join(out, 'dashboard')} (${dash.length} files), ${join(out, 'screenshots')} (${shots.length} images) and ${join(out, 'dossier.json')}\n`,
+    `token radar: wrote ${join(out, 'board.json')}, ${join(out, 'data.js')}, ${join(out, 'dashboard')} (${dash.length} files), ${join(out, 'screenshots')} (${shots.length} images), ${join(out, 'category-summary.json')}, ${join(out, 'category-summary.md')} and ${join(out, 'dossier.json')}\n` +
+    (hasFlag('summary') ? summaryMd : ''),
 );

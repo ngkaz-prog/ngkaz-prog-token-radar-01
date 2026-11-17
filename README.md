@@ -59,4 +59,9 @@ mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts --input <path to snapshot.js
 ```
 
 `main.ts` is Node 22, standard library only. It writes `out/board.json`, `out/data.js`,
-`out/dashboard/`, `out/screenshots/` and `out/dossier.json`.
+`out/dashboard/`, `out/screenshots/` and `out/dossier.json`, plus two more readings of
+the same board: `out/category-summary.json` (one row per category, with the watchlist
+split) and `out/category-summary.md` (the same table as markdown). `--summary` prints
+that markdown to stdout as well; `--help` prints the usage. Neither file changes the
+board or the dashboard: the board's rows, ranks and implied values are exactly the
+same with or without them.

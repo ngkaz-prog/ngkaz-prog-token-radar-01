@@ -1,1 +1,4 @@
+# Local run output: main.ts writes the board, the dashboard and the dossier here when
+# MAKEFUN_OUTPUT_DIR=out is set. Nothing in out/ is part of the entry; the grader writes
+# its own /output from the sealed snapshot, so this directory is never committed.
 out/

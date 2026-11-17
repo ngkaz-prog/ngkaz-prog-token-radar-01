@@ -1,1 +1,5 @@
 # Dashboard screenshots
+# Three images, all taken from the dashboard this repository ships: 1-board.png is the
+# ranked board, 2-detail.png is one protocol's detail view, 3-filtered.png is a filtered
+# board. main.ts copies them to /output/screenshots/ unchanged, and the gate refuses a
+# run with fewer than three.
